@@ -1,0 +1,44 @@
+#!/usr/bin/env python
+import os
+import subprocess
+import sys
+import sqlite3
+bucket="gs://ane-test4/"
+#DB
+subprocess.call(["gsutil", "cp", bucket+"db", "."])
+conn=sqlite3.connect("db")
+c=conn.cursor()
+c.execute("Delete FROM files_local")
+conn.commit()
+rootdir = "."
+for root, subFolders, files in os.walk(rootdir):
+    for file in files:
+	fullpath=os.path.join(root,file)
+	modified=os.path.getmtime(fullpath)
+	size=os.path.getsize(fullpath)
+	c.execute("INSERT INTO files_local VALUES ('%s','%s','%s')" % (fullpath.replace("./",""), int(modified), size))
+#	print "%s %s %s" % (fullpath.replace("./",""),modified,size)
+conn.commit()
+print "Local db updated"
+#Fetch Remote FileListing
+if os.path.exists('db'):
+	print  "db exists"
+	#Copy Difference
+	query="Select DISTINCT a.* from files_local a, files b WHERE \
+		a.name NOT IN (Select name from files) \
+		OR \
+		a.name=b.name AND (a.modified!=b.modified OR a.size!=b.size)"
+	c.execute(query)
+	for row in c:
+		print row[0]+" modified, uploading... "
+		subprocess.call(["gsutil", "cp", row[0], bucket])	
+		
+else:
+	#Copy ALl Files
+	subprocess.call(["gsutil", "cp", "*", bucket])	
+c.execute('Delete From files');
+c.execute('Insert into files select distinct * from files_local')
+conn.commit()
+print "Re-uploading file db (Finalizing)"
+subprocess.call(["gsutil", "cp", "db", bucket])
+conn.close()	
